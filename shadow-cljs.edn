@@ -8,4 +8,11 @@
  []
 
  :builds
- {}}
+ {:app {:target :node-script
+        :main advent2019.core/main
+        :output-to "target/js/app.js"
+        :devtools {:repl-init-ns advent2019.core
+                   :repl-pprint true}}
+  :test {:target :node-test
+         :output-to "target/js/test.js"
+         :autorun true}}}
