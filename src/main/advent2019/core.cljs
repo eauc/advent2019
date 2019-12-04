@@ -207,12 +207,41 @@
   )
 
 
+(defn valid-password?
+  [password]
+  (let [digits (-> password .toString (.split "") js->clj)]
+    ((every-pred #(= 6 (count %))
+                 #(= (sort %) %)
+                 #(not= (count (set %)) (count %))
+                 (fn [d]
+                   (->> d
+                        (partition-by identity)
+                        (filter #(= 2 (count %)))
+                        first)))
+     digits)))
+
+
+(comment
+
+  (vector
+    (valid-password? 111111)
+    (valid-password? 223450)
+    (valid-password? 123789)
+    (valid-password? 112233)
+    (valid-password? 123444)
+    (valid-password? 111122))
+
+  (count (filter valid-password? (range 231832 767346)))
+  )
+
+
 (defn main [& cli-args]
   (prn "hello world")
-  (prn
-    (wires->closest-intersection
-      (map
-        #(-> %
-             (clojure.string/split ","))
-        (clojure.string/split-lines
-          (fs/readFileSync "./wires.txt"))))))
+  ;; (prn
+  ;;   (wires->closest-intersection
+  ;;     (map
+  ;;       #(-> %
+  ;;            (clojure.string/split ","))
+  ;;       (clojure.string/split-lines
+  ;;         (fs/readFileSync "./wires.txt")))))
+  )

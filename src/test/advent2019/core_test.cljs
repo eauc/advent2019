@@ -23,3 +23,11 @@
   (is (= 410 (core/wires->closest-intersection
                [["R98" "U47" "R26" "D63" "R33" "U87" "L62" "D20" "R33" "U53" "R51"]
                 ["U98" "R91" "D20" "R16" "D67" "R40" "U7" "R15" "U6" "R7"]]))))
+
+(deftest password-test
+  (is (= false (core/valid-password? 111111)))
+  (is (= false (core/valid-password? 223450)))
+  (is (= false (core/valid-password? 123789)))
+  (is (= true (core/valid-password? 112233)))
+  (is (= false (core/valid-password? 123444)))
+  (is (= true (core/valid-password? 111122))))
