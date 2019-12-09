@@ -414,6 +414,111 @@
   )
 
 
+(defn orbit-pairs
+  [orbits]
+  (mapv #(clojure.string/split % ")") orbits))
+
+
+(defn object-center
+  [object orbit-pairs]
+  (first (first (filter #(= (last %) object) orbit-pairs))))
+
+
+(defn orbit-checksum
+  [checksums object orbit-pairs]
+  (if (get checksums object)
+    checksums
+    (if (= object "COM")
+      (assoc checksums "COM" 0)
+      (let [center (object-center object orbit-pairs)
+            new-checksums (orbit-checksum checksums center orbit-pairs)
+            center-checksum (get new-checksums center)]
+        (assoc new-checksums object (inc center-checksum))))))
+
+
+(defn orbits-checksum
+  [orbits]
+  (let [pairs (orbit-pairs orbits)]
+    (->> pairs
+         (mapv last)
+         (reduce #(orbit-checksum %1 %2 pairs) {})
+         (map last)
+         (reduce + 0))))
+
+
+(defn object-centers
+  [object orbit-pairs]
+  (loop [current-object object
+         centers []]
+    (let [center (object-center current-object orbit-pairs)]
+      (if (= center "COM")
+        (conj centers "COM")
+        (recur center (conj centers center))))))
+
+(defn centers-distance
+  [from centers]
+  (count
+    (take-while #(not= from %) centers)))
+
+
+(defn orbital-transferts
+  [from to orbits]
+  (let [pairs (orbit-pairs orbits)
+        from-centers (object-centers from pairs)
+        to-centers (object-centers to pairs)
+        common-centers (clojure.set/intersection
+                         (set from-centers)
+                         (set to-centers))
+        closest-common (->> common-centers
+                            (sort-by #(centers-distance % from-centers))
+                            first)]
+    (+ (centers-distance closest-common from-centers)
+       (centers-distance closest-common to-centers))))
+
+
+(comment
+
+  (orbits-checksum
+    ["COM)B"
+     "B)C"
+     "C)D"
+     "D)E"
+     "E)F"
+     "B)G"
+     "G)H"
+     "D)I"
+     "E)J"
+     "J)K"
+     "K)L"])
+
+  (orbital-transferts
+    "YOU" "SAN"
+    ["COM)B"
+     "B)C"
+     "C)D"
+     "D)E"
+     "E)F"
+     "B)G"
+     "G)H"
+     "D)I"
+     "E)J"
+     "J)K"
+     "K)L"
+     "K)YOU"
+     "I)SAN"])
+
+  (def orbits
+    (clojure.string/split-lines
+      (fs/readFileSync "./orbits.txt")))
+
+  (orbits-checksum orbits)
+  ;; 158090
+
+  (orbital-transferts "YOU" "SAN" orbits)
+  ;; 241
+
+  )
+
 (defn main [& cli-args]
   (prn "hello world")
   ;; (prn
@@ -424,3 +529,4 @@
   ;;       (clojure.string/split-lines
   ;;         (fs/readFileSync "./wires.txt")))))
   )
+
