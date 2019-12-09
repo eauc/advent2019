@@ -27,83 +27,262 @@
 
   )
 
+(defn parameter
+  [pc param-index memory]
+  (let [opcode (nth memory pc)
+        param-mode (-> opcode
+                       (/ (js/Math.pow 10 (+ param-index 2)))
+                       js/Math.floor
+                       (mod 10)
+                       (= 1)
+                       (if :immediate :position))
+        param-value (nth memory (+ pc 1 param-index))]
+    (if (= param-mode :immediate)
+      param-value
+      (nth memory param-value))))
 
-(defn assoc-output
-  [output n value]
-  (concat (take n output)
-          (list value)
-          (drop (inc n) output)))
+(comment
+  (parameter 2 0 [0 1 2    4 5 6])
+  ;; 5
+  (parameter 2 0 [0 1 102  4 5 6])
+  ;; 4
+  (parameter 2 1 [0 1 2    4 5 6])
+  ;; 6
+  (parameter 2 1 [0 1 1002 4 5 6])
+  ;; 5
+
+  )
 
 
 (defmulti run-opcode
-  (fn [program output]
-    (first program))
+  (fn [memory pc input output]
+    (mod (nth memory pc) 100))
   :default 99)
 
 
 (defmethod run-opcode 99
-  [program output]
-  [(list) output])
+  [memory pc input output]
+  [memory -1 input output])
 
 (defmethod run-opcode 1
-  [[_ op-a op-b op-result & prog-rest] output]
-  (let [result (+ (nth output op-a)
-                  (nth output op-b))]
-    [prog-rest (assoc-output output op-result result)]))
+  [memory pc input output]
+  (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
+        a (parameter pc 0 memory)
+        b (parameter pc 1 memory)
+        result (+ a b)]
+    [(assoc memory param-result result) (+ pc 4) input output]))
 
 (defmethod run-opcode 2
-  [[_ op-a op-b op-result & prog-rest] output]
-  (let [result (* (nth output op-a)
-                  (nth output op-b))]
-    [prog-rest (assoc-output output op-result result)]))
+  [memory pc input output]
+  (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
+        a (parameter pc 0 memory)
+        b (parameter pc 1 memory)
+        result (* a b)]
+    [(assoc memory param-result result) (+ pc 4) input output]))
+
+(defmethod run-opcode 3
+  [memory pc input output]
+  (let [[_ param-to & prog-rest] (drop pc memory)]
+    [(assoc memory param-to (first input)) (+ pc 2) (subvec input 1) output]))
+
+(defmethod run-opcode 4
+  [memory pc input output]
+  (let [[_ param-from & prog-rest] (drop pc memory)
+        from (parameter pc 0 memory)]
+    [memory (+ pc 2) input (conj output from)]))
+
+(defmethod run-opcode 5
+  [memory pc input output]
+  (let [[_ param-a param-result & prog-rest] (drop pc memory)
+        test-value (parameter pc 0 memory)
+        jump-to (parameter pc 1 memory)
+        new-pc (if (not= test-value 0) jump-to (+ pc 3))]
+    [memory new-pc input output]))
+
+(defmethod run-opcode 6
+  [memory pc input output]
+  (let [[_ param-a param-result & prog-rest] (drop pc memory)
+        test-value (parameter pc 0 memory)
+        jump-to (parameter pc 1 memory)
+        new-pc (if (= test-value 0) jump-to (+ pc 3))]
+    [memory new-pc input output]))
+
+(defmethod run-opcode 7
+  [memory pc input output]
+  (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
+        a (parameter pc 0 memory)
+        b (parameter pc 1 memory)
+        result (if (< a b) 1 0)]
+    [(assoc memory param-result result) (+ pc 4) input output]))
+
+(defmethod run-opcode 8
+  [memory pc input output]
+  (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
+        a (parameter pc 0 memory)
+        b (parameter pc 1 memory)
+        result (if (= a b) 1 0)]
+    [(assoc memory param-result result) (+ pc 4) input output]))
 
 
 (defn run-program
-  ([program output]
-   (if (= 0 (count program))
-     output
-     (let [[prog-rest new-output] (run-opcode program output)]
-       (run-program (take-last (count prog-rest) new-output) new-output))))
-  ([program]
-   (run-program program program)))
+  ([memory pc input output]
+   (if (> 0 pc)
+     {:memory memory
+      :pc pc
+      :input input
+      :output output}
+     (let [[new-memory new-pc new-input new-output] (run-opcode memory pc input output)]
+       (run-program new-memory new-pc new-input new-output))))
+  ([memory input output]
+   (run-program memory 0 input output))
+  ([memory]
+   (run-program memory [] [])))
 
 
 (defn call-program
-  [program noun verb]
+  [program noun verb input output]
   (-> program
-      (assoc-output 1 noun)
-      (assoc-output 2 verb)
-      run-program
-      first))
+      (assoc 1 noun)
+      (assoc 2 verb)
+      (run-program input output)))
 
 
 (comment
 
-  (run-opcode [99] [1 0])
-  (run-opcode [1 0 0 0 99] [1 0 0 0 99])
-  (run-opcode [2 3 0 3 99] [2 3 0 3 99])
+  (run-opcode [99 1 0] 0 [] [])
+  ;; [[99 1 0] -1]
+  (run-opcode [1 0 0 0 99] 0 [] [])
+  ;; [(2 0 0 0 99) 4]
+  (run-opcode [2 3 0 3 99] 0 [] [])
+  ;; [(2 3 0 6 99) 4]
+  (run-opcode [3 0 99] 0 [1] [])
+  ;; [[1 0 99] 2 () []]
+  (run-opcode [4 0 99] 0 [] [])
+  ;;[[4 0 99] 2 [] [4]]
+  (run-opcode [1002 4 3 4 33] 0 [] [])
+  ;; [[1002 4 3 4 99] 4 [] []]
+  (run-opcode [1001 4 3 4 33] 0 [] [])
+  ;; [[1001 4 3 4 36] 4 [] []]
+  (run-opcode [104 4] 0 [] [])
+  ;; [[104 4] 2 [] [4]]
+  (run-opcode [108 4 3 4] 0 [] [])
+  ;; [[108 4 3 4 1] 4 [] []]
+  (run-opcode [8 1 2 4 1] 0 [] [])
+  ;; [[8 1 2 4 0] 4 [] []]
+  (run-opcode [107 4 3 4] 0 [] [])
+  ;; [[107 4 3 4 0] 4 [] []]
+  (run-opcode [7 1 2 4 0] 0 [] [])
+  ;; [[7 1 2 4 1] 4 [] []]
+  (run-opcode [1105 1 3] 0 [] [])
+  ;; [[1105 1 3] 3 [] []]
+  (run-opcode [1105 0 3] 0 [] [])
+  ;; [[1105 0 3] 0 [] []]
+  (run-opcode [1106 0 3] 0 [] [])
+  ;; [[1106 0 3] 3 [] []]
+  (run-opcode [1106 1 3] 0 [] [])
+  ;; [[1106 1 3] 0 [] []]
 
   (run-program [99])
+  ;; [99]
   (run-program [1 0 0 0 99])
+  ;; (2 0 0 0 99)
   (run-program [2 3 0 3 99])
+  ;; (2 3 0 6 99)
   (run-program [2 4 4 5 99 0])
+  ;; (2 4 4 5 99 9801)
   (run-program [1 1 1 4 99 5 6 0 99])
+  ;; (30 1 1 4 2 5 6 0 99)
+  (run-program [3 0 4 0 99] [42] [])
+  ;; {:memory [42 0 4 0 99], :pc -1, :input [], :output [42]}
+  (run-program [1002 4 3 4 33] [] [])
+  ;; {:memory [1002 4 3 4 99], :pc -1, :input [], :output []}
+  (run-program [3 9 8 9 10 9 4 9 99 -1 8] [8] [])
+  ;; {:memory [3 9 8 9 10 9 4 9 99 1 8], :pc -1, :input [], :output [1]}
+  (run-program [3 9 7 9 10 9 4 9 99 -1 8] [7] [])
+  ;; {:memory [3 9 7 9 10 9 4 9 99 1 8], :pc -1, :input [], :output [1]}
+  (run-program [3 3 1108 -1 8 3 4 3 99] [7] [])
+  ;; {:memory [3 3 1108 0 8 3 4 3 99], :pc -1, :input [], :output [0]}
+  (run-program [3 3 1107 -1 8 3 4 3 99] [8] [])
+  ;; {:memory [3 3 1107 0 8 3 4 3 99], :pc -1, :input [], :output [0]}
+  (run-program [3 12 6 12 15 1 13 14 13 4 13 99 -1 0 1 9] [0] [])
+  ;; {:memory [3 12 6 12 15 1 13 14 13 4 13 99 0 0 1 9],
+  ;;  :pc -1, 
+  ;;  :input [], 
+  ;;  :output [0]}
+  (run-program [3 12 6 12 15 1 13 14 13 4 13 99 -1 0 1 9] [8] [])
+  ;; {:memory [3 12 6 12 15 1 13 14 13 4 13 99 8 1 1 9],
+  ;;  :pc -1, 
+  ;;  :input [], 
+  ;;  :output [1]}
+  (run-program [3 3 1105 -1 9 1101 0 0 12 4 12 99 1] [0] [])
+  ;; {:memory [3 3 1105 0 9 1101 0 0 12 4 12 99 0],
+  ;;  :pc -1, 
+  ;;  :input [], 
+  ;;  :output [0]}
+  (run-program [3 3 1105 -1 9 1101 0 0 12 4 12 99 1] [8] [])
+  ;; {:memory [3 3 1105 8 9 1101 0 0 12 4 12 99 1],
+  ;;  :pc -1, 
+  ;;  :input [], 
+  ;;  :output [1]}
+  (->
+    (run-program [3 21 1008 21 8 20 1005 20 22 107 8 21 20 1006 20 31
+                  1106 0 36 98 0 0 1002 21 125 20 4 20 1105 1 46 104
+                  999 1105 1 46 1101 1000 1 20 4 20 1105 1 46 98 99] [8] [])
+    :output
+    last)
+  ;; 1000
+  (->
+    (run-program [3 21 1008 21 8 20 1005 20 22 107 8 21 20 1006 20 31
+                  1106 0 36 98 0 0 1002 21 125 20 4 20 1105 1 46 104
+                  999 1105 1 46 1101 1000 1 20 4 20 1105 1 46 98 99] [9] [])
+    :output
+    last)
+  ;; 1001
+  (->
+    (run-program [3 21 1008 21 8 20 1005 20 22 107 8 21 20 1006 20 31
+                  1106 0 36 98 0 0 1002 21 125 20 4 20 1105 1 46 104
+                  999 1105 1 46 1101 1000 1 20 4 20 1105 1 46 98 99] [7] [])
+    :output
+    last)
+  ;; 999
 
   (def gravity-program
-    (map
+    (mapv
       #(js/parseInt % 10)
       (clojure.string/split
         (fs/readFileSync "./gravity_program.txt")
         #",")))
 
-  (call-program gravity-program 12 2)
+  (-> gravity-program
+      (call-program 12 2)
+      :memory
+      first)
   ;; 4570637
 
   (filter
     #(= 19690720 (nth % 2))
-    (for [noun (range 30 60)
+    (for [noun (range 99)
           verb (range 99)]
-      [noun verb (call-program gravity-program noun verb)]))
+      [noun verb (-> gravity-program (call-program noun verb) :memory first)]))
+  ;; ([54 85 19690720])
+
+  (def test-program
+    (mapv
+      #(js/parseInt % 10)
+      (clojure.string/split
+        (fs/readFileSync "./test_program.txt")
+        #",")))
+
+  (-> test-program
+      (run-program [1] [])
+      :output
+      last)
+  ;; 11193703
+  (-> test-program
+      (run-program [5] [])
+      :output
+      last)
+  ;; 12410607
 
   )
 
