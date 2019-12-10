@@ -1,6 +1,9 @@
 (ns advent2019.core
   (:require ["fs" :as fs]
-            [clojure.set]))
+            [clojure.set]
+            [clojure.core.async
+             :as async
+             :refer [>! <! close! go go-loop chan buffer timeout to-chan]]))
 
 (defn module-fuel-requirement
   [module-mass]
@@ -61,189 +64,301 @@
 
 
 (defmethod run-opcode 99
-  [memory pc input output]
-  [memory -1 input output])
+  [memory pc _ output]
+  (go
+    (prn "opcode-99 close!")
+    (close! output)
+    [memory -1]))
 
 (defmethod run-opcode 1
-  [memory pc input output]
-  (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
-        a (parameter pc 0 memory)
-        b (parameter pc 1 memory)
-        result (+ a b)]
-    [(assoc memory param-result result) (+ pc 4) input output]))
+  [memory pc _ _]
+  (go
+    (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
+          a (parameter pc 0 memory)
+          b (parameter pc 1 memory)
+          result (+ a b)]
+      (prn "opcode-1" a b param-result result)
+      [(assoc memory param-result result) (+ pc 4)])))
 
 (defmethod run-opcode 2
-  [memory pc input output]
-  (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
-        a (parameter pc 0 memory)
-        b (parameter pc 1 memory)
-        result (* a b)]
-    [(assoc memory param-result result) (+ pc 4) input output]))
+  [memory pc _ _]
+  (go
+    (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
+          a (parameter pc 0 memory)
+          b (parameter pc 1 memory)
+          result (* a b)]
+      (prn "opcode-2" a b param-result result)
+      [(assoc memory param-result result) (+ pc 4)])))
 
 (defmethod run-opcode 3
-  [memory pc input output]
-  (let [[_ param-to & prog-rest] (drop pc memory)]
-    [(assoc memory param-to (first input)) (+ pc 2) (subvec input 1) output]))
+  [memory pc input _]
+  (go
+    (let [[_ param-to & prog-rest] (drop pc memory)
+          in-value (<! input)]
+      (prn "opcode-3" param-to in-value)
+      [(assoc memory param-to in-value) (+ pc 2)])))
 
 (defmethod run-opcode 4
-  [memory pc input output]
-  (let [[_ param-from & prog-rest] (drop pc memory)
-        from (parameter pc 0 memory)]
-    [memory (+ pc 2) input (conj output from)]))
+  [memory pc _ output]
+  (go
+    (let [[_ param-from & prog-rest] (drop pc memory)
+          from (parameter pc 0 memory)]
+      (prn "opcode-4" from)
+      (>! output from)
+      [memory (+ pc 2)])))
 
 (defmethod run-opcode 5
-  [memory pc input output]
-  (let [[_ param-a param-result & prog-rest] (drop pc memory)
-        test-value (parameter pc 0 memory)
-        jump-to (parameter pc 1 memory)
-        new-pc (if (not= test-value 0) jump-to (+ pc 3))]
-    [memory new-pc input output]))
+  [memory pc _ _]
+  (go
+    (let [[_ param-a param-result & prog-rest] (drop pc memory)
+          test-value (parameter pc 0 memory)
+          jump-to (parameter pc 1 memory)
+          new-pc (if (not= test-value 0) jump-to (+ pc 3))]
+      (prn "opcode-5" test-value jump-to new-pc)
+      [memory new-pc])))
 
 (defmethod run-opcode 6
-  [memory pc input output]
-  (let [[_ param-a param-result & prog-rest] (drop pc memory)
-        test-value (parameter pc 0 memory)
-        jump-to (parameter pc 1 memory)
-        new-pc (if (= test-value 0) jump-to (+ pc 3))]
-    [memory new-pc input output]))
+  [memory pc _ _]
+  (go
+    (let [[_ param-a param-result & prog-rest] (drop pc memory)
+          test-value (parameter pc 0 memory)
+          jump-to (parameter pc 1 memory)
+          new-pc (if (= test-value 0) jump-to (+ pc 3))]
+      (prn "opcode-6" test-value jump-to new-pc)
+      [memory new-pc])))
 
 (defmethod run-opcode 7
-  [memory pc input output]
-  (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
-        a (parameter pc 0 memory)
-        b (parameter pc 1 memory)
-        result (if (< a b) 1 0)]
-    [(assoc memory param-result result) (+ pc 4) input output]))
+  [memory pc _ _]
+  (go
+    (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
+          a (parameter pc 0 memory)
+          b (parameter pc 1 memory)
+          result (if (< a b) 1 0)]
+      (prn "opcode-7" a b param-result result)
+      [(assoc memory param-result result) (+ pc 4)])))
 
 (defmethod run-opcode 8
-  [memory pc input output]
-  (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
-        a (parameter pc 0 memory)
-        b (parameter pc 1 memory)
-        result (if (= a b) 1 0)]
-    [(assoc memory param-result result) (+ pc 4) input output]))
+  [memory pc _ _]
+  (go
+    (let [[_ param-a param-b param-result & prog-rest] (drop pc memory)
+          a (parameter pc 0 memory)
+          b (parameter pc 1 memory)
+          result (if (= a b) 1 0)]
+      (prn "opcode-8" a b param-result result)
+      [(assoc memory param-result result) (+ pc 4)])))
 
 
 (defn run-program
   ([memory pc input output]
-   (if (> 0 pc)
-     {:memory memory
-      :pc pc
-      :input input
-      :output output}
-     (let [[new-memory new-pc new-input new-output] (run-opcode memory pc input output)]
-       (run-program new-memory new-pc new-input new-output))))
+   (prn "start")
+   (go-loop [current-memory memory
+             current-pc pc]
+     (if (> 0 current-pc)
+       (do
+         (prn "end")
+         {:memory current-memory
+          :pc current-pc})
+       (let [[new-memory new-pc] (<! (run-opcode current-memory current-pc input output))
+             _ (prn (str "ran-opcode " current-pc "->" new-pc))]
+         (recur new-memory new-pc)))))
   ([memory input output]
    (run-program memory 0 input output))
   ([memory]
-   (run-program memory [] [])))
+   (run-program memory (chan) (chan))))
 
 
 (defn call-program
-  [program noun verb input output]
+  [program noun verb]
   (-> program
       (assoc 1 noun)
       (assoc 2 verb)
-      (run-program input output)))
+      run-program))
 
 
 (comment
 
-  (run-opcode [99 1 0] 0 [] [])
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [99 1 0] 0 (chan) (chan)))))
   ;; [[99 1 0] -1]
-  (run-opcode [1 0 0 0 99] 0 [] [])
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [1 0 0 0 99] 0 (chan) (chan)))))
   ;; [(2 0 0 0 99) 4]
-  (run-opcode [2 3 0 3 99] 0 [] [])
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [2 3 0 3 99] 0 (chan) (chan)))))
   ;; [(2 3 0 6 99) 4]
-  (run-opcode [3 0 99] 0 [1] [])
-  ;; [[1 0 99] 2 () []]
-  (run-opcode [4 0 99] 0 [] [])
-  ;;[[4 0 99] 2 [] [4]]
-  (run-opcode [1002 4 3 4 33] 0 [] [])
-  ;; [[1002 4 3 4 99] 4 [] []]
-  (run-opcode [1001 4 3 4 33] 0 [] [])
-  ;; [[1001 4 3 4 36] 4 [] []]
-  (run-opcode [104 4] 0 [] [])
-  ;; [[104 4] 2 [] [4]]
-  (run-opcode [108 4 3 4] 0 [] [])
-  ;; [[108 4 3 4 1] 4 [] []]
-  (run-opcode [8 1 2 4 1] 0 [] [])
-  ;; [[8 1 2 4 0] 4 [] []]
-  (run-opcode [107 4 3 4] 0 [] [])
-  ;; [[107 4 3 4 0] 4 [] []]
-  (run-opcode [7 1 2 4 0] 0 [] [])
-  ;; [[7 1 2 4 1] 4 [] []]
-  (run-opcode [1105 1 3] 0 [] [])
-  ;; [[1105 1 3] 3 [] []]
-  (run-opcode [1105 0 3] 0 [] [])
-  ;; [[1105 0 3] 0 [] []]
-  (run-opcode [1106 0 3] 0 [] [])
-  ;; [[1106 0 3] 3 [] []]
-  (run-opcode [1106 1 3] 0 [] [])
-  ;; [[1106 1 3] 0 [] []]
+  (go
+    (def *result nil)
+    (let [_ (prn "start")
+          input (to-chan [1])
+          _ (prn "input")
+          [memory pc] (<! (run-opcode [3 0 99] 0 input (chan)))]
+      (def *result [memory pc])))
+  ;; [[1 0 99] 2]
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          [memory pc] (<! (run-opcode [4 0 99] 0 (chan) output))]
+      (def *result [memory pc (<! output)])))
+  ;;[[4 0 99] 2 4]
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [1002 4 3 4 33] 0 (chan) (chan)))))
+  ;; [[1002 4 3 4 99] 4]
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [1001 4 3 4 33] 0 (chan) (chan)))))
+  ;; [[1001 4 3 4 36] 4]
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-opcode [104 4] 0 (chan) output))]
+      (def *result (conj result (<! output)))))
+  ;; [[104 4] 2 4]
+  (go
+    (let [output (chan 1)
+          result (<! (run-opcode [104 5] 0 (chan) output))]
+      (def *result (conj result (<! output)))))
+  ;; [[104 4] 2 5]
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [108 4 3 4] 0 (chan) (chan)))))
+  ;; [[108 4 3 4 1] 4]
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [8 1 2 4 1] 0 (chan) (chan)))))
+  ;; [[8 1 2 4 0] 4]
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [107 4 3 4] 0 (chan) (chan)))))
+  ;; [[107 4 3 4 0] 4]
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [7 1 2 4 0] 0 (chan) (chan)))))
+  ;; [[7 1 2 4 1] 4]
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [1105 1 5] 0 (chan) (chan)))))
+  ;; [[1105 1 5] 5]
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [1105 0 5] 0 (chan) (chan)))))
+  ;; [[1105 0 5] 3]
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [1106 0 5] 0 (chan) (chan)))))
+  ;; [[1106 0 5] 5]
+  (go
+    (def *result nil)
+    (def *result (<! (run-opcode [1106 1 5] 0 (chan) (chan)))))
+  ;; [[1106 1 5] 3]
 
-  (run-program [99])
-  ;; [99]
-  (run-program [1 0 0 0 99])
-  ;; (2 0 0 0 99)
-  (run-program [2 3 0 3 99])
-  ;; (2 3 0 6 99)
-  (run-program [2 4 4 5 99 0])
-  ;; (2 4 4 5 99 9801)
-  (run-program [1 1 1 4 99 5 6 0 99])
-  ;; (30 1 1 4 2 5 6 0 99)
-  (run-program [3 0 4 0 99] [42] [])
-  ;; {:memory [42 0 4 0 99], :pc -1, :input [], :output [42]}
-  (run-program [1002 4 3 4 33] [] [])
-  ;; {:memory [1002 4 3 4 99], :pc -1, :input [], :output []}
-  (run-program [3 9 8 9 10 9 4 9 99 -1 8] [8] [])
-  ;; {:memory [3 9 8 9 10 9 4 9 99 1 8], :pc -1, :input [], :output [1]}
-  (run-program [3 9 7 9 10 9 4 9 99 -1 8] [7] [])
-  ;; {:memory [3 9 7 9 10 9 4 9 99 1 8], :pc -1, :input [], :output [1]}
-  (run-program [3 3 1108 -1 8 3 4 3 99] [7] [])
-  ;; {:memory [3 3 1108 0 8 3 4 3 99], :pc -1, :input [], :output [0]}
-  (run-program [3 3 1107 -1 8 3 4 3 99] [8] [])
-  ;; {:memory [3 3 1107 0 8 3 4 3 99], :pc -1, :input [], :output [0]}
-  (run-program [3 12 6 12 15 1 13 14 13 4 13 99 -1 0 1 9] [0] [])
-  ;; {:memory [3 12 6 12 15 1 13 14 13 4 13 99 0 0 1 9],
-  ;;  :pc -1, 
-  ;;  :input [], 
-  ;;  :output [0]}
-  (run-program [3 12 6 12 15 1 13 14 13 4 13 99 -1 0 1 9] [8] [])
-  ;; {:memory [3 12 6 12 15 1 13 14 13 4 13 99 8 1 1 9],
-  ;;  :pc -1, 
-  ;;  :input [], 
-  ;;  :output [1]}
-  (run-program [3 3 1105 -1 9 1101 0 0 12 4 12 99 1] [0] [])
-  ;; {:memory [3 3 1105 0 9 1101 0 0 12 4 12 99 0],
-  ;;  :pc -1, 
-  ;;  :input [], 
-  ;;  :output [0]}
-  (run-program [3 3 1105 -1 9 1101 0 0 12 4 12 99 1] [8] [])
-  ;; {:memory [3 3 1105 8 9 1101 0 0 12 4 12 99 1],
-  ;;  :pc -1, 
-  ;;  :input [], 
-  ;;  :output [1]}
-  (->
-    (run-program [3 21 1008 21 8 20 1005 20 22 107 8 21 20 1006 20 31
-                  1106 0 36 98 0 0 1002 21 125 20 4 20 1105 1 46 104
-                  999 1105 1 46 1101 1000 1 20 4 20 1105 1 46 98 99] [8] [])
-    :output
-    last)
+  (go
+    (def *result nil)
+    (def *result (<! (run-program [99]))))
+  ;; {:memory [99], :pc -1}
+  (go
+    (def *result nil)
+    (def *result (<! (run-program [1 0 0 0 99]))))
+  ;; {:memory [2 0 0 0 99], :pc -1}
+  (go
+    (def *result nil)
+    (def *result (<! (run-program [2 3 0 3 99]))))
+  ;; {:memory [2 3 0 6 99], :pc -1}
+  (go
+    (def *result nil)
+    (def *result (<! (run-program [2 4 4 5 99 0]))))
+  ;; {:memory [2 4 4 5 99 9801], :pc -1}
+  (go
+    (def *result nil)
+    (def *result (<! (run-program [1 1 1 4 99 5 6 0 99]))))
+  ;; {:memory [30 1 1 4 2 5 6 0 99], :pc -1}
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 0 4 0 99] (to-chan [42]) output))]
+      (def *result [result (<! output)])))
+  ;; [{:memory [42 0 4 0 99], :pc -1} 42]
+  (go
+    (def *result nil)
+    (def *result (<! (run-program [1002 4 3 4 33]))))
+  ;; {:memory [1002 4 3 4 99], :pc -1}
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 9 8 9 10 9 4 9 99 -1 8] (to-chan [8]) output))]
+      (def *result [result (<! output)])))
+  ;; [{:memory [3 9 8 9 10 9 4 9 99 1 8], :pc -1} 1]
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 9 7 9 10 9 4 9 99 -1 8] (to-chan [7]) output))]
+      (def *result [result (<! output)])))
+  ;; [{:memory [3 9 7 9 10 9 4 9 99 1 8], :pc -1} 1]
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 3 1108 -1 8 3 4 3 99] (to-chan [7]) output))]
+      (def *result [result (<! output)])))
+  ;; [{:memory [3 3 1108 0 8 3 4 3 99], :pc -1} 0]
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 3 1107 -1 8 3 4 3 99] (to-chan [8]) output))]
+      (def *result [result (<! output)])))
+  ;; [{:memory [3 3 1107 0 8 3 4 3 99], :pc -1} 0]
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 12 6 12 15 1 13 14 13 4 13 99 -1 0 1 9] (to-chan [0]) output))]
+      (def *result [result (<! output)])))
+  ;; [{:memory [3 12 6 12 15 1 13 14 13 4 13 99 0 0 1 9], :pc -1} 0]
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 12 6 12 15 1 13 14 13 4 13 99 -1 0 1 9] (to-chan [8]) output))]
+      (def *result [result (<! output)])))
+  ;; [{:memory [3 12 6 12 15 1 13 14 13 4 13 99 8 1 1 9], :pc -1} 1]
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 3 1105 -1 9 1101 0 0 12 4 12 99 1] (to-chan [0]) output))]
+      (def *result [result (<! output)])))
+  ;; [{:memory [3 3 1105 0 9 1101 0 0 12 4 12 99 0], :pc -1} 0]
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 3 1105 -1 9 1101 0 0 12 4 12 99 1] (to-chan [8]) output))]
+      (def *result [result (<! output)])))
+  ;; [{:memory [3 3 1105 8 9 1101 0 0 12 4 12 99 1], :pc -1} 1]
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 21 1008 21 8 20 1005 20 22 107 8 21 20 1006 20 31
+                                   1106 0 36 98 0 0 1002 21 125 20 4 20 1105 1 46 104
+                                   999 1105 1 46 1101 1000 1 20 4 20 1105 1 46 98 99]
+                                  (to-chan [8]) output))]
+      (def *result (<! output))))
   ;; 1000
-  (->
-    (run-program [3 21 1008 21 8 20 1005 20 22 107 8 21 20 1006 20 31
-                  1106 0 36 98 0 0 1002 21 125 20 4 20 1105 1 46 104
-                  999 1105 1 46 1101 1000 1 20 4 20 1105 1 46 98 99] [9] [])
-    :output
-    last)
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 21 1008 21 8 20 1005 20 22 107 8 21 20 1006 20 31
+                                   1106 0 36 98 0 0 1002 21 125 20 4 20 1105 1 46 104
+                                   999 1105 1 46 1101 1000 1 20 4 20 1105 1 46 98 99]
+                                  (to-chan [9]) output))]
+      (def *result (<! output))))
   ;; 1001
-  (->
-    (run-program [3 21 1008 21 8 20 1005 20 22 107 8 21 20 1006 20 31
-                  1106 0 36 98 0 0 1002 21 125 20 4 20 1105 1 46 104
-                  999 1105 1 46 1101 1000 1 20 4 20 1105 1 46 98 99] [7] [])
-    :output
-    last)
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          result (<! (run-program [3 21 1008 21 8 20 1005 20 22 107 8 21 20 1006 20 31
+                                   1106 0 36 98 0 0 1002 21 125 20 4 20 1105 1 46 104
+                                   999 1105 1 46 1101 1000 1 20 4 20 1105 1 46 98 99]
+                                  (to-chan [7]) output))]
+      (def *result (<! output))))
   ;; 999
 
   (def gravity-program
@@ -253,10 +368,12 @@
         (fs/readFileSync "./gravity_program.txt")
         #",")))
 
-  (-> gravity-program
-      (call-program 12 2)
-      :memory
-      first)
+  (go
+    (def *result nil)
+    (def *result
+      (-> (<! (call-program gravity-program 12 2))
+          :memory
+          first)))
   ;; 4570637
 
   (filter
@@ -273,15 +390,18 @@
         (fs/readFileSync "./test_program.txt")
         #",")))
 
-  (-> test-program
-      (run-program [1] [])
-      :output
-      last)
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          _ (run-program test-program (to-chan [1]) output)]
+      (def *result (last (<! (async/into [] output))))))
   ;; 11193703
-  (-> test-program
-      (run-program [5] [])
-      :output
-      last)
+
+  (go
+    (def *result nil)
+    (let [output (chan 1)
+          _ (run-program test-program (to-chan [5]) output)]
+      (def *result (last (<! (async/into [] output))))))
   ;; 12410607
 
   )
@@ -519,6 +639,202 @@
 
   )
 
+
+(defn amplifier-chain
+  [program [p1 p2 p3 p4 p5] output]
+  (let [c1 (to-chan [p1 0])
+        c2 (chan 1)
+        c3 (chan 1)
+        c4 (chan 1)
+        c5 (chan 1)]
+    (go
+      (>! c2 p2)
+      (>! c3 p3)
+      (>! c4 p4)
+      (>! c5 p5))
+    (run-program program c5 output)
+    (run-program program c4 c5)
+    (run-program program c3 c4)
+    (run-program program c2 c3)
+    (run-program program c1 c2)))
+
+
+(def phases
+  (for [p1 (range 5)
+        p2 (filter (complement #{p1}) (range 5))
+        p3 (filter (complement #{p1 p2}) (range 5))
+        p4 (filter (complement #{p1 p2 p3}) (range 5))
+        p5 (filter (complement #{p1 p2 p3 p4}) (range 5))]
+    [p1 p2 p3 p4 p5]))
+
+(defn amplifier-chain-max-output
+  [program]
+  (go-loop [[current-phases & phases-rest] phases
+            result 0]
+    (if (nil? current-phases)
+      result
+      (let [output (chan 1)
+            _ (amplifier-chain program current-phases output)
+            new-result (<! output)]
+        (recur phases-rest (max result new-result))))))
+
+
+(defn amplifier-loop
+  [program [p1 p2 p3 p4 p5]]
+  (let [c1 (chan 1)
+        c1m (async/mult c1)
+        c2 (chan 1)
+        c3 (chan 1)
+        c4 (chan 1)
+        c5 (chan 1)]
+    (go
+      (prn "c1")
+      (>! c1 p1)
+      (>! c2 p2)
+      (>! c3 p3)
+      (>! c4 p4)
+      (>! c5 p5)
+      (>! c1 0)
+      (prn "all"))
+    (run-program program c5 c1)
+    (run-program program c4 c5)
+    (run-program program c3 c4)
+    (run-program program c2 c3)
+    (run-program program (async/tap c1m (chan 1)) c2)
+    (async/tap c1m (chan 1))))
+
+
+(def loop-phases
+  (for [p1 (range 5 10)
+        p2 (filter (complement #{p1}) (range 5 10))
+        p3 (filter (complement #{p1 p2}) (range 5 10))
+        p4 (filter (complement #{p1 p2 p3}) (range 5 10))
+        p5 (filter (complement #{p1 p2 p3 p4}) (range 5 10))]
+    [p1 p2 p3 p4 p5]))
+
+(defn amplifier-loop-max-output
+  [program]
+  (go-loop [[current-phases & phases-rest] loop-phases
+            result 0]
+    (prn current-phases result)
+    (if (nil? current-phases)
+      result
+      (let [output (amplifier-loop program current-phases)
+            new-result (last (<! (async/into [] output)))]
+        (prn phases-rest new-result)
+        (recur phases-rest (max result new-result))))))
+
+
+(comment
+
+  (def amplifier-program
+    (mapv
+      #(js/parseInt % 10)
+      (clojure.string/split
+        (fs/readFileSync "./amplifier_program.txt")
+        #",")))
+
+  (go
+    (def *result nil)
+    (let [output (chan 1)]
+      (run-program amplifier-program (to-chan [0 0]) output)
+      (def *result (<! output))))
+  ;; 18
+
+  (go
+    (def *result nil)
+    (let [output (chan 1)]
+      (amplifier-chain
+        [3 15 3 16 1002 16 10 16 1 16 15 15 4 15 99 0 0]
+        [4 3 2 1 0]
+        output)
+      (def *result (<! output))))
+  ;; 43210
+
+  (do
+    (def *result nil)
+    (go
+      (def *result
+        (<! (amplifier-chain-max-output
+              [3 15 3 16 1002 16 10 16 1 16 15 15 4 15 99 0 0])))))
+  ;; 43210
+
+  (do
+    (def *result nil)
+    (go
+      (def *result
+        (<! (amplifier-chain-max-output
+              [3 23 3 24 1002 24 10 24 1002 23 -1 23
+               101 5 23 23 1 24 23 23 4 23 99 0 0])))))
+  ;; 54321
+
+  (do
+    (def *result nil)
+    (go
+      (def *result
+        (<! (amplifier-chain-max-output
+              [3 31 3 32 1002 32 10 32 1001 31 -2 31 1007 31 0 33
+               1002 33 7 33 1 33 31 31 1 32 31 31 4 31 99 0 0 0])))))
+  ;; 65210
+
+  (do
+    (def *result nil)
+    (go
+      (def *result
+        (<! (amplifier-chain-max-output
+              amplifier-program)))))
+  ;; 87138
+
+  (go
+    (def *result nil)
+    (let [output ;; (chan 1)
+          (amplifier-loop
+            [3 26 1001 26 -4 26 3 27 1002 27 2 27 1 27 26
+             27 4 27 1001 28 -1 28 1005 28 6 99 0 0 5]
+            [9 8 7 6 5])]
+      (def *result (last (<! (async/into [] output))))))
+  ;; 139629729
+
+  (go
+    (def *result nil)
+    (let [output ;; (chan 1)
+          (amplifier-loop
+            [3 52 1001 52 -5 52 3 53 1 52 56 54 1007 54 5 55 1005 55 26 1001 54
+             -5 54 1105 1 12 1 53 54 53 1008 54 0 55 1001 55 1 55 2 53 55 53 4
+             53 1001 56 -1 56 1005 56 6 99 0 0 0 0 10]
+            [9 7 8 5 6])]
+      (def *result (last (<! (async/into [] output))))))
+  ;; 18216
+
+  (do
+    (def *result nil)
+    (go
+      (def *result
+        (<! (amplifier-loop-max-output
+              [3 26 1001 26 -4 26 3 27 1002 27 2 27 1 27 26
+               27 4 27 1001 28 -1 28 1005 28 6 99 0 0 5])))))
+  ;; 139629729
+
+  (do
+    (def *result nil)
+    (go
+      (def *result
+        (<! (amplifier-loop-max-output
+              [3 52 1001 52 -5 52 3 53 1 52 56 54 1007 54 5 55 1005 55 26 1001 54
+               -5 54 1105 1 12 1 53 54 53 1008 54 0 55 1001 55 1 55 2 53 55 53 4
+               53 1001 56 -1 56 1005 56 6 99 0 0 0 0 10])))))
+  ;; 18216
+
+  (do
+    (def *result nil)
+    (go
+      (def *result
+        (<! (amplifier-loop-max-output
+              amplifier-program)))))
+  ;; 17279674
+
+  )
+
 (defn main [& cli-args]
   (prn "hello world")
   ;; (prn
@@ -529,4 +845,3 @@
   ;;       (clojure.string/split-lines
   ;;         (fs/readFileSync "./wires.txt")))))
   )
-
