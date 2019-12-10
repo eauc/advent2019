@@ -835,6 +835,59 @@
 
   )
 
+
+(defn img-layers
+  [img-str width height]
+  (partition-all (* width height) img-str))
+
+
+(defn img-check
+  [img-str width height]
+  (let [layers (img-layers img-str width height)
+        check-layer (->> layers
+                         (sort-by #(count (filter #{"0"} %)))
+                         first)]
+    (* (count (filter #{"1"} check-layer))
+       (count (filter #{"2"} check-layer)))))
+
+
+(defn decoded-img
+  [img-str width height]
+  (apply
+    map (fn [& pixels]
+          (first (filter (complement #{"2"}) pixels)))
+    (img-layers img-str width height)))
+
+
+(comment
+
+  (img-check "123456789012" 3 2)
+
+  (def img
+    (butlast
+      (.toString
+        (fs/readFileSync "./image.txt"))))
+
+  (img-check img 25 6)
+  ;; 2193
+
+
+  (decoded-img "0222112222120000" 2 2)
+
+  (println
+    (clojure.string/join
+      "\n"
+      (map
+        #(clojure.string/join "" %)
+        (partition-all
+          25
+          (map
+            #(if (= "0" %) " " "*")
+            (decoded-img img 25 6))))))
+
+  )
+
+
 (defn main [& cli-args]
   (prn "hello world")
   ;; (prn
