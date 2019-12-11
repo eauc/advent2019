@@ -998,13 +998,337 @@
   )
 
 
+(defn asteroids
+  [asteroids-map]
+  (reduce
+    (fn [positions [line y]]
+      (concat positions
+              (->> (map vector line (range))
+                   (filter (comp #{"#"} first))
+                   (mapv #(vector (second %) y)))))
+    []
+    (map vector asteroids-map (range))))
+
+
+(defn asteroid-vector
+  [from to]
+  [(- (first to)
+      (first from))
+   (- (second to)
+      (second from))])
+
+
+(defn asteroid-vector->azimuth
+  [[dx dy]]
+  (let [theta (+ (js/Math.atan2 dy dx)
+                 (/ js/Math.PI 2))]
+    (if (> 0 theta)
+      (+ theta (* js/Math.PI 2))
+      theta)))
+
+
+(defn asteroid-vector->range
+  [[dx dy]]
+  (+ (* dx dx)
+     (* dy dy)))
+
+
+(defn asteroid-hide?
+  [from to by]
+  (let [[from->by-x from->by-y] (asteroid-vector from by)
+        [from->to-x from->to-y] (asteroid-vector from to)]
+    (and
+      (< 0 (+ (* from->by-x from->to-x)
+              (* from->by-y from->to-y)))
+      (< (+ (* from->by-x from->by-x)
+              (* from->by-y from->by-y))
+         (+ (* from->to-x from->to-x)
+            (* from->to-y from->to-y)))
+      (= 0 (- (* from->by-x from->to-y)
+              (* from->by-y from->to-x))))))
+
+
+(defn asteroid-some-hide?
+  [from to asteroids]
+  (->> asteroids
+       (filter #(and (not= from %) (not= to %)))
+       (some #(asteroid-hide? from to %))))
+
+
+(defn asteroid-visible-count
+  [from asteroids]
+  (dec
+    (count
+      (filter
+        #(not (asteroid-some-hide? from % asteroids))
+        asteroids))))
+
+
+(defn asteroid-visible-counts
+  [asteroids]
+  (mapv
+    #(vector % (asteroid-visible-count % asteroids))
+    asteroids))
+
+
+(defn asteroid-station-position
+  [asteroids]
+  (first
+    (last
+      (sort-by
+        second
+        (asteroid-visible-counts asteroids)))))
+
+
+(defn asteroid-vaporize-order
+  [pos asteroids]
+  (map
+    vector
+    (range)
+    (sort-by
+      first
+      (map
+        #((comp first second) %)
+        (group-by
+          first
+          (sort-by
+            second
+            (map
+              (fn [asteroid]
+                (let [pos->asteroid (asteroid-vector pos asteroid)]
+                  [(asteroid-vector->azimuth pos->asteroid)
+                   (asteroid-vector->range pos->asteroid)
+                   asteroid]))
+              asteroids)))))))
+
+(comment
+  (asteroid-some-hide?
+    [4 0]
+    [4 4]
+    (asteroids
+      [".#..#"
+       "....."
+       "#####"
+       "....#"
+       "...##"]))
+  ;; true
+
+  (asteroid-visible-count
+    [4 0]
+    (asteroids
+      [".#..#"
+       "....."
+       "#####"
+       "....#"
+       "...##"]))
+  ;; 7
+  (asteroid-visible-count
+    [22 25]
+    (asteroids
+      asteroids-map))
+
+  (asteroid-vector->azimuth
+    (asteroid-vector
+      [1 1] [1 0]))
+  (asteroid-vector->azimuth
+    (asteroid-vector
+      [1 1] [2 1]))
+  (asteroid-vector->azimuth
+    (asteroid-vector
+      [1 1] [1 2]))
+  (asteroid-vector->azimuth
+    (asteroid-vector
+      [1 1] [0 1]))
+  (asteroid-vector->range
+    (asteroid-vector
+      [1 1] [0 1]))
+  (asteroid-vector->range
+    (asteroid-vector
+      [1 1] [3 3]))
+
+  (asteroid-visible-counts
+    (asteroids
+      [".#..#"
+       "....."
+       "#####"
+       "....#"
+       "...##"]))
+  ;; [[[1 0] 7]
+  ;;  [[4 0] 7]
+  ;;  [[0 2] 6]
+  ;;  [[1 2] 7]
+  ;;  [[2 2] 7]
+  ;;  [[3 2] 7]
+  ;;  [[4 2] 5]
+  ;;  [[4 3] 7]
+  ;;  [[3 4] 8]
+  ;;  [[4 4] 7]]
+
+  (asteroid-station-position
+    (asteroids
+      [".#..#"
+       "....."
+       "#####"
+       "....#"
+       "...##"]))
+  ;; [3 4]
+  (asteroid-station-position
+    (asteroids
+      ["......#.#."
+       "#..#.#...."
+       "..#######."
+       ".#.#.###.."
+       ".#..#....."
+       "..#....#.#"
+       "#..#....#."
+       ".##.#..###"
+       "##...#..#."
+       ".#....####"]))
+  ;; [5 8]
+  (asteroid-station-position
+    (asteroids
+      ["#.#...#.#."
+       ".###....#."
+       ".#....#..."
+       "##.#.#.#.#"
+       "....#.#.#."
+       ".##..###.#"
+       "..#...##.."
+       "..##....##"
+       "......#..."
+       ".####.###."]))
+  ;; [1 2]
+  (asteroid-station-position
+    (asteroids
+      [".#..#..###"
+       "####.###.#"
+       "....###.#."
+       "..###.##.#"
+       "##.##.#.#."
+       "....###..#"
+       "..#.#..#.#"
+       "#..#.#.###"
+       ".##...##.#"
+       ".....#.#.."]))
+  ;; [6 3]
+  (asteroid-station-position
+    (asteroids
+      [".#..##.###...#######"
+       "##.############..##."
+       ".#.######.########.#"
+       ".###.#######.####.#."
+       "#####.##.#.##.###.##"
+       "..#####..#.#########"
+       "####################"
+       "#.####....###.#.#.##"
+       "##.#################"
+       "#####.##.###..####.."
+       "..######..##.#######"
+       "####.##.####...##..#"
+       ".#####..#.######.###"
+       "##...#.##########..."
+       "#.##########.#######"
+       ".####.#.###.###.#.##"
+       "....##.##.###..#####"
+       ".#.#.###########.###"
+       "#.#.#.#####.####.###"
+       "###.##.####.##.#..##"]))
+
+
+  (asteroid-vector
+    [3 5] [6 1])
+  ;; [3 -4]
+
+  (asteroid-hide?
+    [3 15] [15 7] [0 0])
+  ;; false
+  (asteroid-hide?
+    [3 15] [15 7] [9 11])
+  ;; true
+  (asteroid-hide?
+    [3 15] [15 7] [6 13])
+  ;; true
+  (asteroid-hide?
+    [3 15] [15 7] [6 11])
+  ;; false
+  (asteroid-hide?
+    [1 0] [0 2] [4 3])
+  ;; false
+  (asteroid-hide?
+    [1 0] [3 4] [2 2])
+  ;; true
+  (asteroid-hide?
+    [1 0] [4 4] [2 2])
+  ;; false
+  (asteroid-hide?
+    [4 0] [4 4] [4 2])
+  ;; true
+
+  (def asteroids-map
+    (clojure.string/split-lines
+      (fs/readFileSync "./asteroids_map.txt")))
+
+  (asteroid-vaporize-order
+    [11 13]
+    (asteroids
+      [".#..##.###...#######"
+       "##.############..##."
+       ".#.######.########.#"
+       ".###.#######.####.#."
+       "#####.##.#.##.###.##"
+       "..#####..#.#########"
+       "####################"
+       "#.####....###.#.#.##"
+       "##.#################"
+       "#####.##.###..####.."
+       "..######..##.#######"
+       "####.##.####...##..#"
+       ".#####..#.######.###"
+       "##...#.##########..."
+       "#.##########.#######"
+       ".####.#.###.###.#.##"
+       "....##.##.###..#####"
+       ".#.#.###########.###"
+       "#.#.#.#####.####.###"
+       "###.##.####.##.#..##"]))
+
+  (nth
+    (asteroid-vaporize-order
+      [22 25]
+      (asteroids
+        asteroids-map))
+    199)
+  ;; [199 [5.602664082512372 730 [5 4]]]
+  )
+
 (defn main [& cli-args]
   (prn "hello world")
   ;; (prn
-  ;;   (wires->closest-intersection
-  ;;     (map
-  ;;       #(-> %
-  ;;            (clojure.string/split ","))
+  ;;   (asteroid-station-position
+  ;;     (asteroids
+  ;;       [".#..##.###...#######"
+  ;;        "##.############..##."
+  ;;        ".#.######.########.#"
+  ;;        ".###.#######.####.#."
+  ;;        "#####.##.#.##.###.##"
+  ;;        "..#####..#.#########"
+  ;;        "####################"
+  ;;        "#.####....###.#.#.##"
+  ;;        "##.#################"
+  ;;        "#####.##.###..####.."
+  ;;        "..######..##.#######"
+  ;;        "####.##.####...##..#"
+  ;;        ".#####..#.######.###"
+  ;;        "##...#.##########..."
+  ;;        "#.##########.#######"
+  ;;        ".####.#.###.###.#.##"
+  ;;        "....##.##.###..#####"
+  ;;        ".#.#.###########.###"
+  ;;        "#.#.#.#####.####.###"
+  ;;        "###.##.####.##.#..##"])))
+  ;; (prn
+  ;;   (asteroid-station-position
+  ;;     (asteroids
   ;;       (clojure.string/split-lines
-  ;;         (fs/readFileSync "./wires.txt")))))
+  ;;         (fs/readFileSync "./asteroids_map.txt")))))
   )
