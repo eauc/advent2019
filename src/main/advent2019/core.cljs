@@ -1301,6 +1301,115 @@
   ;; [199 [5.602664082512372 730 [5 4]]]
   )
 
+(def turn->direction
+  {[0 -1] {"R" [ 1  0] "L" [-1 0]}
+   [1  0] {"R" [ 0  1] "L" [ 0 -1]}
+   [0  1] {"R" [-1  0] "L" [ 1  0]}
+   [-1 0] {"R" [ 0 -1] "L" [ 0  1]}})
+
+(defn robot-move
+  [[x y] direction turn]
+  (let [new-direction (get-in turn->direction [direction turn])]
+    [[(+ x (first new-direction))
+      (+ y (second new-direction))]
+     new-direction]))
+
+
+(defn display-panes
+  [panes]
+  (let [positions (keys panes)
+        x-min (apply min (map first positions))
+        x-max (apply max (map first positions))
+        y-min (apply min (map second positions))
+        y-max (apply max (map second positions))
+        width (inc (- x-max x-min))
+        height (inc (- y-max y-min))
+        canvas (vec (take (* width height) (repeat " ")))
+        img (reduce
+              (fn [canvas [[x y] color]]
+                (assoc canvas
+                       (+ (- x x-min) (* width (- y y-min)))
+                       (if (= 1 color) "#" " ")))
+              canvas panes)]
+    (clojure.string/join
+      "\n"
+      (map
+        clojure.string/join
+        (partition-all width img)))))
+
+
+(comment
+
+  (print
+    (display-panes *panes)
+    )
+
+  (robot-move
+    [1 1] [0 -1] "R")
+  ;; [[2 1] [1 0]]
+  (robot-move
+    [1 1] [0 -1] "L")
+  ;; [[0 1] [-1 0]]
+  (robot-move
+    [1 1] [1 0] "R")
+  ;; [[1 2] [0 1]]
+  (robot-move
+    [1 1] [1 0] "L")
+  ;; [[1 0] [0 -1]]
+  (robot-move
+    [1 1] [0 1] "R")
+  ;; [[0 1] [-1 0]]
+  (robot-move
+    [1 1] [0 1] "L")
+  ;; [[2 1] [1 0]]
+  (robot-move
+    [1 1] [-1 0] "R")
+  ;; [[1 0] [0 -1]]
+  (robot-move
+    [1 1] [-1 0] "L")
+  ;; [[1 2] [0 1]]
+
+
+  (def paint-robot-program
+    (mapv
+      #(js/parseInt % 10)
+      (clojure.string/split
+        (fs/readFileSync "./paint_robot_program.txt")
+        #",")))
+
+  (let [input (chan 1)
+        output (chan 1)]
+    (def *panes nil)
+    (go
+      (prn
+        "end"
+        (loop [panes {}
+               position [0 0]
+               direction [-1 0]]
+          (let [new-color (<! output)
+                turn (if (= (<! output) 1) "R" "L")]
+            (if (or (nil? new-color) (nil? turn))
+              (do
+                (def *panes panes)
+                [(count (keys panes)) panes position])
+              (let [[new-position new-direction] (robot-move position direction turn)
+                    color (get panes new-position 0)]
+                (prn "cycle"
+                     new-color color
+                     position direction
+                     turn
+                     new-position new-direction)
+                (>! input color)
+                (recur
+                  (assoc panes position new-color)
+                  new-position
+                  new-direction)))))))
+    (go
+      (>! input 1)
+      (run-program paint-robot-program input output)))
+
+  )
+
 (defn main [& cli-args]
   (prn "hello world")
   ;; (prn
